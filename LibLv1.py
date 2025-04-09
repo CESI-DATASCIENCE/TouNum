@@ -166,6 +166,38 @@ def create_mobilenetv2_model(input_shape, class_count, show_summary=False, dropo
 
     return model
 
+def create_efficientnet_model(input_shape, class_count, show_summary=False, dropout_rate=0.3, fine_tune_at=None):
+    base_model = tf.keras.applications.EfficientNetB0(
+        input_shape=input_shape,
+        include_top=False,
+        weights='imagenet'
+    )
+    base_model.trainable = False  # On gèle le modèle pour l'instant
+
+    inputs = keras.Input(shape=input_shape)
+    x = tf.keras.applications.efficientnet.preprocess_input(inputs)  # Prétraitement spécifique
+    x = base_model(x, training=False)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    if dropout_rate > 0:
+        x = layers.Dropout(dropout_rate)(x)
+
+    outputs = layers.Dense(class_count, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+
+    if show_summary:
+        model.summary()
+
+    # Optionnel : fine-tuning partiel
+    if fine_tune_at is not None:
+        base_model.trainable = True
+        for layer in base_model.layers[:fine_tune_at]:
+            layer.trainable = False
+        print(f"Fine-tuning activé à partir de la couche {fine_tune_at}.")
+
+    return model
+
 def TrainModel(model, train_set, test_set, nbEpochs=10, endEpochCallback=None, UseEarlyStopping=True, modelCheckpoint=None):
     callbacks = []
     if modelCheckpoint and os.path.exists(modelCheckpoint):
@@ -350,3 +382,4 @@ def create_balanced_no_photos_folder(base_path=".\\dataset_binary"):
             shutil.copy(file_path, no_photos_folder)
 
     print("No_photos folder created with matching proportions and cleaned of corrupted files.")
+
