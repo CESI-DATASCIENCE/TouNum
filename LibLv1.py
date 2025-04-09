@@ -12,6 +12,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 import tensorflow as tf
+import shutil
+import random
 
 def is_gpu_available(min_gpu_index=0):
     """
@@ -30,12 +32,10 @@ def is_gpu_available(min_gpu_index=0):
     
     if len(physical_devices) > min_gpu_index:
         try:
-            # Activer la gestion dynamique de la mémoire
-            tf.config.experimental.set_memory_growth(physical_devices[min_gpu_index], True)
-            
             # Restreindre TensorFlow à utiliser uniquement le GPU spécifié
             tf.config.set_visible_devices(physical_devices[min_gpu_index], 'GPU')
-            
+            # Activer la gestion dynamique de la mémoire
+            tf.config.experimental.set_memory_growth(physical_devices[min_gpu_index], True)
             print(f"GPU {min_gpu_index} est activé avec gestion dynamique de la mémoire.")
             return True
         except Exception as e:
@@ -44,7 +44,7 @@ def is_gpu_available(min_gpu_index=0):
     else:
         print("Pas assez de GPU disponibles.")
         return False
-   
+
 # Vérification et correction des images
 def preprocess_images(directory):
     valid_extensions = {".jpg", ".jpeg", ".png"}
@@ -69,6 +69,29 @@ def preprocess_images(directory):
                 print(f" Image corrompue supprimée : {file_path}")
                 os.remove(file_path)  
                 continue
+
+def prepare_data(data_dir, target_size=(224, 224), batch_size=32, val_split=0.2):
+
+    train_gen = tf.keras.preprocessing.image_dataset_from_directory(
+        data_dir,
+        validation_split = val_split,  
+        subset="training",
+        seed=42, 
+        image_size=target_size,
+        batch_size=batch_size
+    )
+
+# Jeu de test (20% des données)
+    val_gen = tf.keras.preprocessing.image_dataset_from_directory(
+        data_dir,
+        validation_split = val_split,  
+        subset = "validation",
+        seed = 42,
+        image_size = target_size,
+        batch_size = batch_size
+    )
+    
+    return train_gen, val_gen
 
 def Create_Sequential(inputShape, ClassNb, useData_augmentation=True, ShowSummary=False, dropOut=0):
     model = keras.Sequential()
@@ -108,6 +131,38 @@ def Create_Sequential(inputShape, ClassNb, useData_augmentation=True, ShowSummar
 
     if ShowSummary:
         model.summary()
+
+    return model
+
+def create_mobilenetv2_model(input_shape, class_count, show_summary=False, dropout_rate=0.3, fine_tune_at=None):
+    base_model = tf.keras.applications.MobileNetV2(
+        input_shape=input_shape,
+        include_top=False,
+        weights='imagenet'  # Utilise les poids pré-entraînés sur ImageNet
+    )
+    base_model.trainable = False  # Gèle les poids du modèle de base pour le moment
+
+    inputs = keras.Input(shape=input_shape)
+    x = tf.keras.applications.mobilenet_v2.preprocess_input(inputs)  # Prétraitement spécifique à MobileNetV2
+    x = base_model(x, training=False)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    if dropout_rate > 0:
+        x = layers.Dropout(dropout_rate)(x)
+
+    outputs = layers.Dense(class_count, activation='softmax')(x)
+
+    model = keras.Model(inputs, outputs)
+
+    if show_summary:
+        model.summary()
+
+    # Optionnel : fine-tuning de certaines couches si demandé
+    if fine_tune_at is not None:
+        base_model.trainable = True
+        for layer in base_model.layers[:fine_tune_at]:
+            layer.trainable = False
+        print(f"Fine-tuning activé à partir de la couche {fine_tune_at}.")
 
     return model
 
@@ -240,3 +295,58 @@ def plot_confusion_matrix(model, test_set, class_names, title="Matrice de Confus
     plt.xlabel("Prédictions")
     plt.ylabel("Réel")
     plt.show()
+
+def create_balanced_no_photos_folder(base_path=".\\dataset_binary"):
+    photo_folder = os.path.join(base_path, "Photo")
+    no_photos_folder = os.path.join(base_path, "No_photos")
+    other_folders = [
+        os.path.join(base_path, "Painting"),
+        os.path.join(base_path, "Schematics"),
+        os.path.join(base_path, "Sketch"),
+        os.path.join(base_path, "Text")
+    ]
+    # Supprimer le dossier No_photos s’il existe et le recréer
+    if os.path.exists(no_photos_folder):
+        shutil.rmtree(no_photos_folder)
+    os.makedirs(no_photos_folder)
+
+    # Vérifie si un fichier est une image corrompue
+    def is_file_corrupted(filepath):
+        try:
+            with Image.open(filepath) as img:
+                img.verify()
+            return False
+        except:
+            return True
+
+    # Récupérer les fichiers valides dans les autres dossiers
+    valid_files = {}
+    for folder in other_folders:
+        if os.path.exists(folder):
+            all_files = [
+                os.path.join(folder, f)
+                for f in os.listdir(folder)
+                if os.path.isfile(os.path.join(folder, f))
+            ]
+            valid = [f for f in all_files if not is_file_corrupted(f)]
+            valid_files[folder] = valid
+
+    # Compter les images dans le dossier "Photo"
+    photo_files = [
+        f for f in os.listdir(photo_folder)
+        if os.path.isfile(os.path.join(photo_folder, f))
+    ]
+    n_photo_files = len(photo_files)
+
+    # Calcul du total d'images valides et copie proportionnelle
+    total_valid = sum(len(files) for files in valid_files.values())
+
+    for folder, files in valid_files.items():
+        ratio = len(files) / total_valid
+        n_to_copy = round(ratio * n_photo_files)
+        selected_files = random.sample(files, min(n_to_copy, len(files)))
+
+        for file_path in selected_files:
+            shutil.copy(file_path, no_photos_folder)
+
+    print("No_photos folder created with matching proportions and cleaned of corrupted files.")
