@@ -14,6 +14,32 @@ import os
 import tensorflow as tf
 import shutil
 import random
+import winsound
+import keyboard
+import time
+from tensorflow.keras.applications import EfficientNetB0, EfficientNetB1, EfficientNetB2, EfficientNetB3, EfficientNetB4, EfficientNetB5, EfficientNetB6, EfficientNetB7
+from tensorflow.keras import  models
+
+
+def play_beep(frequency=1000, duration=0.1):
+    """
+    Joue un bip sonore avec une fréquence et une durée spécifiées.
+
+    Args:
+        frequency (int): La fréquence du bip en Hertz. (par défaut 1000 Hz)
+        duration (float): La durée du bip en secondes. (par défaut 0.1 seconde)
+    """
+    print("Le bip va commencer. Appuyez sur la touche Entrée pour arrêter...")
+
+    # Écouter les événements de touches pendant que le bip est joué
+    while True:
+        winsound.Beep(frequency, int(duration * 1000))  
+        time.sleep(duration)
+        
+        # Vérifier si la touche Entrée a été pressée
+        if keyboard.is_pressed('enter'):  
+            print("Bip arrêté.")
+            break
 
 def is_gpu_available(min_gpu_index=0):
     """
@@ -198,6 +224,84 @@ def create_efficientnet_model(input_shape, class_count, show_summary=False, drop
 
     return model
 
+def create_efficientnet_models(input_shape, class_count, version='B0', dropout_rate=0.3, fine_tune_at=None):
+    """
+    Crée un modèle EfficientNet spécifié par la version (B0 à B7).
+    """
+    # Dictionnaire des différentes versions de EfficientNet
+    efficientnet_versions = {
+        'B0': EfficientNetB0,
+        'B1': EfficientNetB1,
+        'B2': EfficientNetB2,
+        'B3': EfficientNetB3,
+        'B4': EfficientNetB4,
+        'B5': EfficientNetB5,
+        'B6': EfficientNetB6,
+        'B7': EfficientNetB7
+    }
+
+    if version not in efficientnet_versions:
+        raise ValueError("Version de EfficientNet non valide. Choisissez parmi ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7'].")
+    
+    base_model = efficientnet_versions[version](
+        input_shape=input_shape,
+        include_top=False,
+        weights='imagenet'
+    )
+    base_model.trainable = False  # Geler les poids du modèle pré-entraîné
+    
+    # Création du modèle
+    inputs = tf.keras.Input(shape=input_shape)
+    x = tf.keras.applications.efficientnet.preprocess_input(inputs)  # Prétraitement des images
+    x = base_model(x, training=False)
+    x = layers.GlobalAveragePooling2D()(x)
+    
+    if dropout_rate > 0:
+        x = layers.Dropout(dropout_rate)(x)
+    
+    outputs = layers.Dense(class_count, activation='softmax')(x)
+    
+    model = models.Model(inputs, outputs)
+    
+    # Fine-tuning si nécessaire
+    if fine_tune_at is not None:
+        base_model.trainable = True
+        for layer in base_model.layers[:fine_tune_at]:
+            layer.trainable = False
+        print(f"Fine-tuning activé à partir de la couche {fine_tune_at}.")
+    
+    return model
+
+def load_model_from_weights_and_compile(model, weights_file):
+    """
+    Charge les poids d'un modèle et compile ce dernier si le modèle existe.
+    
+    Args:
+        model (tf.keras.Model): Le modèle à recharger.
+        weights_file (str): Le chemin vers le fichier des poids.
+    
+    Returns:
+        model (tf.keras.Model): Le modèle avec les poids chargés et compilé (si le modèle existe).
+        si erreur il retourne none
+    """
+    if model is not None:  
+        try:
+            model.load_weights(weights_file)
+            print(f"Poids chargés avec succès depuis {weights_file}")
+        except Exception as e:
+            print(f"Erreur lors du chargement des poids : {e}")
+            return None
+
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.0001),
+                      loss='sparse_categorical_crossentropy',
+                      metrics=['accuracy'])
+
+        print("Modèle compilé avec succès.")
+        return model
+    else:
+        print("Le modèle n'a pas été créé ou est invalide.")
+        return None
+
 def TrainModel(model, train_set, test_set, nbEpochs=10, endEpochCallback=None, UseEarlyStopping=True, modelCheckpoint=None):
     callbacks = []
     if modelCheckpoint and os.path.exists(modelCheckpoint):
@@ -228,7 +332,52 @@ def TrainModel(model, train_set, test_set, nbEpochs=10, endEpochCallback=None, U
         epochs=nbEpochs,
         callbacks=callbacks
     )
+
+    
+
     return history
+
+def train_and_test_efficientnets(input_shape, class_count, train_ds, val_ds, start_From = 'B0',nb_epochs=10, dropout_rate=0.3  , fine_tune_at = None ,NameDtaset = "Bin" ):
+    """
+    Entraîne et teste EfficientNet de B0 à B7.
+    """
+    results = {}
+    found = False
+    for version in ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7']:
+        print(f"\n--- Entrainement de EfficientNet-{version} ---")
+        if(not found and version != start_From):
+            print(f"skipping the {version} model")
+            continue
+        found = True
+        model = create_efficientnet_models(input_shape, class_count, version, dropout_rate  , fine_tune_at)
+        history = TrainModel(model, train_ds, val_ds, nb_epochs ,modelCheckpoint=f"models/EfficientNet{version}_{NameDtaset}_best_weights.h5")
+        # Évaluation sur le jeu de validation
+        loss, accuracy = model.evaluate(val_ds)
+        # Stocker les résultats
+        results[version] = {
+            'history': history ,
+            'loss' : loss , 
+            'accuracy'  : accuracy
+        }
+        
+        # Affichage des courbes de performance pour chaque modèle
+        plt.figure(figsize=(12, 6))
+        plt.subplot(1, 2, 1)
+        plt.plot(history.history['accuracy'], label='Accuracy Entrainement')
+        plt.plot(history.history['val_accuracy'], label='Accuracy Validation')
+        plt.title(f'Accuracy de EfficientNet-{version}')
+        plt.legend()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['loss'], label='Loss Entrainement')
+        plt.plot(history.history['val_loss'], label='Loss Validation')
+        plt.title(f'Loss de EfficientNet-{version}')
+        plt.legend()
+
+        plt.show()
+        plot_confusion_matrix(model ,val_ds , list(val_ds.class_names) ,title = f"Matrice de Confusion-{version}-")
+    
+    return results
 
 def displayHistoryData(acc, val_acc, loss, val_loss, nbepochs):
     plt.figure(figsize=(16, 8))
@@ -383,3 +532,46 @@ def create_balanced_no_photos_folder(base_path=".\\dataset_binary"):
 
     print("No_photos folder created with matching proportions and cleaned of corrupted files.")
 
+def show_misclassified_images(model, dataset, class_names, image_size=(224, 224), max_images=10, num_columns=5):
+    """
+    Affiche les images mal classées à partir d'un dataset de validation ou test,
+    sous forme d'une matrice spécifiée par le nombre de colonnes.
+
+    Args:
+        model: Le modèle entraîné.
+        dataset: Dataset TensorFlow (ex: val_ds/test_ds).
+        class_names: Liste des noms des classes.
+        image_size: Tuple pour redimensionner les images.
+        max_images: Nombre maximum d'images à afficher.
+        num_columns: Nombre de colonnes dans la grille d'affichage des images.
+
+    """
+    misclassified = []
+
+    for batch_images, batch_labels in dataset:
+        preds = model.predict(batch_images)
+        predicted_classes = tf.argmax(preds, axis=1)
+        true_classes = tf.cast(batch_labels, tf.int64)
+
+        # Comparaison
+        for i in range(len(batch_images)):
+            if predicted_classes[i] != true_classes[i]:
+                misclassified.append((batch_images[i], predicted_classes[i], true_classes[i]))
+            if len(misclassified) >= max_images:
+                break
+        if len(misclassified) >= max_images:
+            break
+
+    # Calcul du nombre de lignes nécessaires
+    num_rows = (len(misclassified) + num_columns - 1) // num_columns  # Calcul pour le nombre de lignes
+
+    # Affichage
+    plt.figure(figsize=(15, num_rows * 3))  # Ajuste la hauteur de la figure en fonction du nombre de lignes
+    for idx, (img, pred, true) in enumerate(misclassified):
+        plt.subplot(num_rows, num_columns, idx + 1)
+        plt.imshow(img.numpy().astype("uint8"))
+        plt.title(f"Prédit: {class_names[pred]}\nRéel: {class_names[true]}", fontsize=9)
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.show()
