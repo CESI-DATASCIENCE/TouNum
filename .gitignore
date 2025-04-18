@@ -2,3 +2,4 @@ dataset_categorical
 dataset_binary
 Dataset/
 _pycache
+**/logs/**
