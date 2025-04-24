@@ -11,11 +11,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import tensorflow as tf
-import shutil
-import random
-import winsound
-import keyboard
-import time
 from tensorflow.keras.applications import EfficientNetB0, EfficientNetB1, EfficientNetB2, EfficientNetB3, EfficientNetB4, EfficientNetB5, EfficientNetB6, EfficientNetB7
 from tensorflow.keras import  models
 
@@ -139,7 +134,7 @@ def create_autoencoder(input_shape):
     decoded = layers.Conv2D(input_shape[2], (3, 3), activation='sigmoid', padding='same')(x)
 
     autoencoder = keras.Model(input_img, decoded)
-    autoencoder.summary()
+    # autoencoder.summary()
     return autoencoder
 
 

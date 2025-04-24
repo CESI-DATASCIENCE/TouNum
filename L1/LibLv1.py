@@ -14,32 +14,8 @@ import os
 import tensorflow as tf
 import shutil
 import random
-import winsound
-import keyboard
-import time
 from tensorflow.keras.applications import EfficientNetB0, EfficientNetB1, EfficientNetB2, EfficientNetB3, EfficientNetB4, EfficientNetB5, EfficientNetB6, EfficientNetB7
 from tensorflow.keras import  models
-
-
-def play_beep(frequency=1000, duration=0.1):
-    """
-    Joue un bip sonore avec une fréquence et une durée spécifiées.
-
-    Args:
-        frequency (int): La fréquence du bip en Hertz. (par défaut 1000 Hz)
-        duration (float): La durée du bip en secondes. (par défaut 0.1 seconde)
-    """
-    print("Le bip va commencer. Appuyez sur la touche Entrée pour arrêter...")
-
-    # Écouter les événements de touches pendant que le bip est joué
-    while True:
-        winsound.Beep(frequency, int(duration * 1000))  
-        time.sleep(duration)
-        
-        # Vérifier si la touche Entrée a été pressée
-        if keyboard.is_pressed('enter'):  
-            print("Bip arrêté.")
-            break
 
 def is_gpu_available(min_gpu_index=0):
     """
@@ -433,6 +409,8 @@ def test_model(model, test_set=None, image_path=None, class_names=None, image_si
         plt.title(f"Prédit: {class_names[predicted_class]} ({confidence:.2f})")
         plt.axis('off')
         plt.show()
+
+        return class_names[predicted_class], confidence
 
 def plot_confusion_matrix(model, test_set, class_names, title="Matrice de Confusion"):
     """
